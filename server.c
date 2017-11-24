@@ -302,7 +302,7 @@ int main(int argc, char *argv[]){
 						FD_CLR(i, &master); // remove from master set
 					} else {
 						buf[nbytes] = '\0';
-						// printf("Hey we got %s\n", buf);
+						printf("Hey we got %s\n", buf);
 
 						msg_Type = unpack_message(buf, i, listener);
 						// we got some data from a client
@@ -341,6 +341,7 @@ int unpack_message(char *message, int sockfd, int listener){
 	
 	
 	while(string != NULL && count < 4){
+		printf("string = %s\n", string);
 		switch (count){
 			case 0:
 				msg_Type = atoi(string);
@@ -397,10 +398,10 @@ int unpack_message(char *message, int sockfd, int listener){
 		case NEW_SESS:
 			current_client = get_client(client_ID);
 
-			if (current_client->connected_session == true){
-				printf("Please exit a session to create a new one\n");
-				break;
-			}
+			// if (current_client->connected_session == true){
+			// 	printf("Please exit a session to create a new one\n");
+			// 	break;
+			// }
 
 			create(client_ID, data, sockfd);
 		break;
@@ -412,7 +413,9 @@ int unpack_message(char *message, int sockfd, int listener){
 				printf("Please join a session to send messages\n");
 				break;
 			}
-			current_session = get_session(current_client->sessions->session_ID);
+
+			printf("string is: %s\n", string);
+			current_session = get_session(data);
 
 			if (current_session == NULL){
 				printf("You is null\n");
@@ -483,7 +486,9 @@ void join(char *client_ID, char *session_ID, int sockfd){
 	int num = 0;
 
 	char ack[500] = "6:0: :";
-	char nack[100] = "7:0: :";
+	char nack[100] = "7:0:";
+	strcat(nack, session_ID);
+	strcat(nack, ":");
 
 	if (activeSessions == 0){
 		char *error = "no active sessions";
@@ -578,6 +583,7 @@ void create(char *client_ID, char *session_ID, int sockfd){
 	send(sockfd, ack, strlen(ack), 0);
 }
 
+// MESSAGE:len:client_ID:session_ID:text
 void broadcast(char *buf, int fdmax, int listener, fd_set set, int sockfd){
 	//if (msg_Type == MESSAGE){
 
@@ -705,6 +711,7 @@ void logout(char *client_ID){
 	if (current->connected_session){
 		while (curr != NULL){
 			leave(client_ID, curr->session_ID);
+			curr = curr->next;
 		}
 	}
 	current->connected_session = false;

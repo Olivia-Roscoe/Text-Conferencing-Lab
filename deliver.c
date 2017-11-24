@@ -53,12 +53,12 @@ void *get_in_addr(struct sockaddr *sa)
 
 void login(char *client_ID, char *password, char *server_IP, char* server_Port);
 void join(char *session_ID);
-void leave();
+void leave(char *session_ID);
 void create(char *session_ID);
 void list();
 void quit();
-void invite(char *client_ID);
-void send_message(char *text);
+void invite(char *client_ID, char *session_ID);
+void send_message(char *text, char *session_ID);
 char* parse_input(char* input);
 char* pack_message(unsigned int type, unsigned int size, 
 	char source[MAX_NAME], char data[MAX_DATA]);
@@ -68,10 +68,40 @@ struct client{
 	char client_ID[MAX_NAME];
 	char password[MAX_NAME];
 	bool connected;
-	char session_ID[MAX_NAME];
 	bool connected_session;
-	int client_socket; 
+	int num_sessions;
+	int client_socket;
+
+	struct sessionL *sessions;
 };
+
+struct sessionL{
+	char session_ID[MAX_NAME];
+	struct sessionL *next;
+};
+
+struct sessionL* createS (char *session_ID, struct sessionL *root){
+	struct sessionL *new_session = (struct sessionL*)malloc(sizeof(struct sessionL));
+	if (new_session == NULL){
+		printf("Error adding new session");
+		return NULL;
+	}
+
+	strcpy(new_session->session_ID, session_ID);
+	new_session->next = NULL;
+
+	if (root == NULL){
+		root = new_session;
+	} else {
+		struct sessionL *curr = root;
+		while (curr->next != NULL){
+			curr = curr->next;
+		}
+
+		curr->next = new_session;
+	}
+	return root;
+}
 
 struct client current_user;
 
@@ -86,6 +116,8 @@ int main(int argc, char *argv[]) {
 	current_user.connected = false;
 	current_user.connected_session = false;
 	current_user.client_socket = -1;
+	current_user.sessions = NULL;
+	current_user.num_sessions = -1;
 
 	tv.tv_sec = 20;
 	tv.tv_usec = 500000;
@@ -121,7 +153,7 @@ int main(int argc, char *argv[]) {
 
 				numbytes = recv(current_user.client_socket, buf, sizeof(buf), 0);
 				buf[numbytes] = '\0';
-
+				printf("Hey we got: %s\n", buf);
 				decode(buf);
 			} 
 		}
@@ -203,10 +235,10 @@ char* parse_input(char* input){
 					printf("Login before joining a session\n");
 					return fail;
 				}
-				if (current_user.connected_session == true){
-					printf("Already connected! Please leave the current session\n");
-					return fail;
-				}
+				// if (current_user.connected_session == true){
+				// 	printf("Already connected! Please leave the current session\n");
+				// 	return fail;
+				// }
 				// get the sub arguments
 				subString = strtok(NULL, s);
 				if (subString != NULL && nargs < 1){
@@ -237,7 +269,16 @@ char* parse_input(char* input){
 					return fail;
 				}
 
-				leave();
+				subString = strtok(NULL, s);
+				if (subString != NULL && nargs < 1){
+					
+					args[nargs] = (char *)malloc(strlen(subString) + 1);
+					strcpy(args[nargs], subString);
+					nargs++;
+					subString = strtok(NULL, s);
+				}
+
+				leave(args[0]);
 
 			} else if (!strcmp(subString, "/createsession")){
 				if (!current_user.connected){
@@ -284,7 +325,7 @@ char* parse_input(char* input){
 				}
 				// get the sub arguments
 				subString = strtok(NULL, s);
-				if (subString != NULL && nargs < 1){
+				while (subString != NULL && nargs < 2){
 					
 					args[nargs] = (char *)malloc(strlen(subString) + 1);
 					strcpy(args[nargs], subString);
@@ -295,21 +336,37 @@ char* parse_input(char* input){
 				if (subString != NULL){
 					printf("Too many arguments\n");
 					return fail;
-				} else if (nargs != 1){
+				} else if (nargs != 2){
 					printf("Too few arguments\n");
 				}
 
-				invite(args[0]);
+				invite(args[0], args[1]);
 
 
 			} else {
-				printf("Invalid command\n");
+				// printf("want to send a message to %s\n", subString);
+				struct sessionL *curr = current_user.sessions;
+				bool found = false;
+				while (curr != NULL){
+					char comp[50] = "/";
+					strcat(comp, curr->session_ID);
+					if (!strcmp(subString, comp)){
+						subString = strtok(NULL, s);
+						send_message(subString, curr->session_ID);
+						found = true;
+					}
+					curr = curr->next;
+				}
+				if (!found){
+					printf("Invalid session\n");
+				}
 			}
 
 			
 		} else {
 			// received a message for the chat
-			send_message(input);
+			//send_message(input);
+			printf("Invalid command\n");
 		}
 	}
 
@@ -389,7 +446,8 @@ void join(char *session_ID){
 	int bytes_sent;
 
 	message = pack_message(JOIN, strlen(session_ID), current_user.client_ID, session_ID);
-	strcpy(current_user.session_ID, session_ID);
+	current_user.sessions = createS(session_ID, current_user.sessions);
+	current_user.num_sessions++;
 
 	bytes_sent = send(current_user.client_socket, message, strlen(message), 0);
 
@@ -397,15 +455,41 @@ void join(char *session_ID){
 }
 
 
-void leave(){
+void leave(char *session_ID){
 	char *message;
 	int bytes_sent;
-	char text[5] = "leave";
-	printf("trying to leave\n");
+	char text[50] = "";
+	// printf("trying to leave\n");
 
-	current_user.connected_session = false;
-	memset(current_user.session_ID, 0, sizeof(current_user.session_ID));
+	//current_user.connected_session = false;
+	// memset(current_user.session_ID, 0, sizeof(current_user.session_ID));
+	struct sessionL *curr = current_user.sessions->next;
+	struct sessionL *prev = current_user.sessions;
+	struct sessionL *temp;
 
+	// check if its the head of the list
+	if (strcmp(session_ID, prev->session_ID) == 0){
+		temp = prev;
+		current_user.sessions->next = prev->next;
+		current_user.num_sessions--;
+		free(temp);
+		return;
+	}
+
+	while (curr != NULL){
+		if (strcmp(session_ID, curr->session_ID) == 0){
+			temp = curr;
+			prev->next = curr->next;
+			free(temp);
+
+			current_user.num_sessions--;
+			return;
+		}
+		prev = curr;
+		curr = curr->next;
+	}
+
+	strcat(text, session_ID);
 	message = pack_message(LEAVE_SESS, strlen(text), current_user.client_ID, text);
 
 	bytes_sent = send(current_user.client_socket, message, strlen(message), 0);
@@ -416,7 +500,8 @@ void create(char *session_ID){
 	int bytes_sent;
 
 	message = pack_message(NEW_SESS, strlen(session_ID), current_user.client_ID, session_ID);
-	strcpy(current_user.session_ID, session_ID);
+	current_user.sessions = createS(session_ID, current_user.sessions);
+	current_user.num_sessions++;
 
 	bytes_sent = send(current_user.client_socket, message, strlen(message), 0);
 
@@ -442,11 +527,12 @@ void quit(){
 	exit(1);
 }
 
-void invite(char *client_ID){
+void invite(char *client_ID, char *session_ID){
+	printf("Invite got client: %s, and session: %s\n", client_ID, session_ID);
 	char *message;
-	char *invitation = malloc(sizeof(current_user.session_ID)
+	char *invitation = malloc(sizeof(session_ID)
 	 + sizeof(client_ID) + 2);
-	strcpy(invitation, current_user.session_ID);
+	strcpy(invitation, session_ID);
 	strcat(invitation, ":");
 	strcat(invitation, client_ID);
 	int bytes_sent;
@@ -456,8 +542,13 @@ void invite(char *client_ID){
 	bytes_sent = send(current_user.client_socket, message, strlen(message), 0);
 }
 
-void send_message(char *text) {
-	char *message = pack_message(MESSAGE, strlen(text), current_user.client_ID, text);
+// MESSAGE:len:client_ID:session_ID:text
+void send_message(char *text, char *session_ID) {
+	char *input = malloc(sizeof(text) + sizeof(session_ID) + 2);
+	strcpy(input, session_ID);
+	strcat(input, ":");
+	strcat(input, text); 
+	char *message = pack_message(MESSAGE, strlen(input), current_user.client_ID, input);
 
 	int bytes_sent;
 	// Check the client ID
@@ -549,7 +640,7 @@ void decode(char *message){
 		case JN_NAK:
 			printf("Join failed:  %s\n", data);
 			current_user.connected_session = false;
-			memset(current_user.session_ID, 0, sizeof(current_user.session_ID));
+			leave(client_ID);
 		break;
 		case NS_ACK:
 			printf("Created session %s\n", data);
@@ -561,12 +652,14 @@ void decode(char *message){
 				printf("   Active users:\n");
 				printf("       %s\n", data);
 				while (count < length){
-					// string = (NULL, colon);
 					printf("       %s\n", string);
 					count++;
+					string = (NULL, colon);
+					string = (NULL, colon);
+					printf("string is: %s\n", string);
 				}
 				session++;
-				string = strtok(NULL, colon);
+				//string = strtok(NULL, colon);
 			} else {
 				printf("   session_ID: %s\n", data);
 			}
@@ -585,7 +678,7 @@ void decode(char *message){
 
 		break;
 		case MESSAGE:
-			printf("%s: %s\n", client_ID, data);
+			printf("%s-%s: %s\n", data, client_ID, string);
 		break;
 		case INVITE:
 			FD_ZERO(&response);
@@ -599,11 +692,11 @@ void decode(char *message){
 
 			printf("You've been invited to join session '%s' by %s\n",
 				session_ID, client_ID);
-			if (current_user.connected_session == true){
-				printf("type '/accept' to leave current session and join and '/reject' to decline\n");
-			} else {
+			// if (current_user.connected_session == true){
+			// 	printf("type '/accept' to leave current session and join and '/reject' to decline\n");
+			// } else {
 				printf("type '/accept' to join and '/reject' to decline\n");
-			}
+			// }
 
 			// collect data from stdin
 			// don't care about writefds and exceptfds:
@@ -620,9 +713,9 @@ void decode(char *message){
 			} 
 
 			if (strcmp(input, "/accept") == 0){
-				if (current_user.connected_session){
-					leave();
-				}
+				// if (current_user.connected_session){
+				// 	leave();
+				// }
 				join(session_ID);
 			} else if (strcmp(input, "/reject") == 0){
 				printf("Resonse rejected\n");

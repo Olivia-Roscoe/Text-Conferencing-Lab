@@ -66,21 +66,80 @@ struct client{
 	char client_ID[MAX_NAME];
 	char password[MAX_NAME];
 	bool connected;
-	char session_ID[MAX_NAME];
 	bool connected_session;
-	int client_socket; 
+	int client_socket;
+
+	struct sessionL *sessions;
 };
 
 struct session{
 	char session_ID[MAX_NAME];
-	struct client clientList[10];
 	int num_connected;
 	fd_set socket_list;
 	int max_socket;
+
+	struct clientL *clients;
 };
+
+struct sessionL{
+	char session_ID[MAX_NAME];
+	struct sessionL *next;
+};
+
+struct clientL{
+	char client_ID[MAX_NAME];
+	struct clientL *next;
+};
+
+struct sessionL* createS (char *session_ID, struct sessionL *root){
+	struct sessionL *new_session = (struct sessionL*)malloc(sizeof(struct sessionL));
+	if (new_session == NULL){
+		printf("Error adding new session");
+		return NULL;
+	}
+
+	strcpy(new_session->session_ID, session_ID);
+	new_session->next = NULL;
+
+	if (root == NULL){
+		root = new_session;
+	} else {
+		struct sessionL *curr = root;
+		while (curr->next != NULL){
+			curr = curr->next;
+		}
+
+		curr->next = new_session;
+	}
+	return root;
+}
+
+struct clientL* createC (char *client_ID, struct clientL *root){
+	struct clientL *new_client = (struct clientL*)malloc(sizeof(struct clientL));
+	if (new_client == NULL){
+		printf("Error adding new session");
+		return NULL;
+	}
+
+	strcpy(new_client->client_ID, client_ID);
+	new_client->next = NULL;
+
+	struct clientL *curr = root;
+	if (root == NULL){
+		root = new_client;
+	} else {
+		while (curr->next != NULL){
+			curr = curr->next;
+		}
+
+		curr->next = new_client;
+	}
+	return root;
+}
 
 struct client clientList[10];
 struct session sessionList[20];
+
 int activeSessions = 0;
 
 int main(int argc, char *argv[]){
@@ -110,7 +169,8 @@ int main(int argc, char *argv[]){
 
 		clientList[i].connected = false;
 		clientList[i].connected_session = false;
-		memset(clientList[i].session_ID, 0, sizeof(clientList[i].session_ID));
+		clientList[i].sessions = (struct sessionL*)malloc(sizeof(struct sessionL));
+		clientList[i].sessions = NULL;
 		clientList[i].client_socket = -1;
 	}
 
@@ -332,7 +392,7 @@ int unpack_message(char *message, int sockfd, int listener){
 				break;
 			}
 
-			leave(client_ID, current_client->session_ID);
+			leave(client_ID, current_client->sessions->session_ID);
 		break;
 		case NEW_SESS:
 			current_client = get_client(client_ID);
@@ -352,7 +412,7 @@ int unpack_message(char *message, int sockfd, int listener){
 				printf("Please join a session to send messages\n");
 				break;
 			}
-			current_session = get_session(current_client->session_ID);
+			current_session = get_session(current_client->sessions->session_ID);
 
 			if (current_session == NULL){
 				printf("You is null\n");
@@ -437,20 +497,19 @@ void join(char *client_ID, char *session_ID, int sockfd){
 	struct session *current_session = get_session(session_ID);
 
 	if (current_session == NULL){
+		char *error = "session doesn't exist";
+		printf("Requested session doesn't exist\n");
+		strcat(nack, error);
+		send(sockfd, nack, strlen(nack), 0);
 		return;
 	}
 
 	current->connected_session = true;
-	strcpy(current->session_ID, session_ID);
+	current->sessions = createS(session_ID, current->sessions);
 
 	num = current_session->num_connected;
 	
-	strcpy(current_session->clientList[num].client_ID, current->client_ID);
-	strcpy(current_session->clientList[num].password, current->password);
-	strcpy(current_session->clientList[num].session_ID, current->session_ID);
-	current_session->clientList[num].connected = true;
-	current_session->clientList[num].connected_session = true;
-	current_session->clientList[num].client_socket = current->client_socket;
+	current_session->clients = createC(client_ID, current_session->clients);
 
 	FD_SET(sockfd, &current_session->socket_list);
 	if (current_session->max_socket < sockfd){
@@ -459,7 +518,7 @@ void join(char *client_ID, char *session_ID, int sockfd){
 
 	current_session->num_connected++;
 
-	printf("client %s joined %s session\n", current_session->clientList[num].client_ID, sessionList[i].session_ID);
+	printf("client %s joined %s session\n", client_ID, session_ID);
 
 	strcat(ack, session_ID);
 	send(sockfd, ack, strlen(ack), 0);
@@ -495,17 +554,13 @@ void create(char *client_ID, char *session_ID, int sockfd){
 	struct client *current = get_client(client_ID);
 	struct session new_session;
 
-	strcpy(current->session_ID, session_ID);
+	current->sessions = createS(session_ID, current->sessions);
 	current->connected_session = true;
 
 	//sessionList[activeSessions] = new_session;
+	sessionList[activeSessions].clients = NULL;
 	strcpy(sessionList[activeSessions].session_ID, session_ID);
-	strcpy(sessionList[activeSessions].clientList[0].client_ID, current->client_ID);
-	strcpy(sessionList[activeSessions].clientList[0].password, current->password);
-	strcpy(sessionList[activeSessions].clientList[0].session_ID, session_ID);
-	sessionList[activeSessions].clientList[0].connected = true;
-	sessionList[activeSessions].clientList[0].connected_session = true;
-	sessionList[activeSessions].clientList[0].client_socket = current->client_socket;
+	sessionList[activeSessions].clients = createC(client_ID, sessionList[activeSessions].clients);
 
 	sessionList[activeSessions].num_connected = 1;
 
@@ -516,7 +571,6 @@ void create(char *client_ID, char *session_ID, int sockfd){
 	//printf("session ID: %s\n", sessionList[activeSessions].session_ID);
 
 	activeSessions++;
-
 
 	char ack[1000] = "10:0: :";
 	strcat(ack, session_ID);
@@ -566,45 +620,58 @@ void list(int sockfd){
 			strcpy(userSession, sessionList[i].session_ID);
 			strcat(userSession, ":");
 
-			for (int j = 0; j < 10; j++){
-				if (strlen(sessionList[i].clientList[j].client_ID) != 0){
-					strcat(userSession, sessionList[i].clientList[j].client_ID);
+			
+			if (sessionList[i].clients != NULL){
+				struct clientL *curr = sessionList[i].clients;
+
+				while (curr != NULL){
+
+					strcat(userSession, curr->client_ID);
 					// printf("    %s\n", sessionList[i].clientList[j].client_ID);
 					strcat(userSession, " ");
+					curr = curr->next;
 				}
 			}
+			
 			strcat(userSession, " :");
 			strcat(ack, userSession);
-		
 	}
-	// printf("sending %s\n", ack);
+	printf("sending %s\n", ack);
 	send(sockfd, ack, strlen(ack), 0);
 }
 
 void leave(char *client_ID, char *session_ID){
 	struct client *current = get_client(client_ID);
 	struct session *current_session = get_session(session_ID);
+	struct clientL *curr = current_session->clients->next;
+	struct clientL *prev = current_session->clients;
+	struct clientL *temp;
 
-	for(int i = 0; i < current_session->num_connected; i++){
-		if (strcmp(client_ID, current_session->clientList[i].client_ID) == 0){
-			// clear ID
-			memset(current_session->clientList[i].client_ID, 0,
-			 sizeof(current_session->clientList[i].client_ID));
-			// clear session 
-			memset(current_session->clientList[i].session_ID, 0,
-			 sizeof(current_session->clientList[i].session_ID));
-			// clear password
-			memset(current_session->clientList[i].password, 0,
-			 sizeof(current_session->clientList[i].password));
-			current_session->clientList[i].connected = false;
-			current_session->clientList[i].connected_session = false;
-			current_session->clientList[i].client_socket = -1;
+	// check if its the head of the list
+	if (strcmp(client_ID, prev->client_ID) == 0){
+		temp = prev;
+		current_session->clients->next = prev->next;
+
+		current->connected_session = false;
+		FD_CLR(current->client_socket, &current_session->socket_list);
+
+		free(temp);
+		return;
+	}
+
+	while (curr != NULL){
+		if (strcmp(client_ID, curr->client_ID) == 0){
+			temp = curr;
+			prev->next = curr->next;
+			free(temp);
 
 			current->connected_session = false;
 			
 			FD_CLR(current->client_socket, &current_session->socket_list);
-			break;
+			return;
 		}
+		prev = curr;
+		curr = curr->next;
 	}
 
 
@@ -629,13 +696,18 @@ void logout(char *client_ID){
 	// printf("client ID is %s\n", client_ID);
 
 	struct client *current = get_client(client_ID);
+	struct sessionL *curr = current->sessions;
+
 	if (current == NULL){
 		printf("client not found!\n");
 	} 
 	
 	if (current->connected_session){
-		leave(client_ID, current->session_ID);
+		while (curr != NULL){
+			leave(client_ID, curr->session_ID);
+		}
 	}
+	current->connected_session = false;
 	current->connected = false;
 
 	printf("%s logged out\n", client_ID);

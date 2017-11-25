@@ -13,9 +13,9 @@
 #include <arpa/inet.h>
 #include <stdbool.h>
 
-#define MAXDATASIZE 100 // max number of bytes we can get at once
+#define MAXDATASIZE 1000 // max number of bytes we can get at once
 #define MAX_NAME 500
-#define MAX_DATA 1000
+#define MAX_DATA 500
 
 // Define the types of control packages
 #define LOGIN 	1
@@ -35,12 +35,6 @@
 
 #define STDIN 0
 
-struct lab3message {
-	unsigned int type;
-	unsigned int size;
-	unsigned char source[MAX_NAME];
-	unsigned char data[MAX_DATA];
-};
 
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
@@ -61,7 +55,7 @@ void invite(char *client_ID, char *session_ID);
 void send_message(char *text, char *session_ID);
 char* parse_input(char* input);
 char* pack_message(unsigned int type, unsigned int size, 
-	char source[MAX_NAME], char data[MAX_DATA]);
+	char *source, char *data);
 void decode(char *message);
 
 struct client{
@@ -152,8 +146,8 @@ int main(int argc, char *argv[]) {
 			if (FD_ISSET(current_user.client_socket, &readfds)){
 
 				numbytes = recv(current_user.client_socket, buf, sizeof(buf), 0);
-				buf[numbytes] = '\0';
-				printf("Hey we got: %s\n", buf);
+				buf[numbytes] = "\0";
+				// printf("Hey we got: %s\n", buf);
 				decode(buf);
 			} 
 		}
@@ -351,7 +345,7 @@ char* parse_input(char* input){
 					char comp[50] = "/";
 					strcat(comp, curr->session_ID);
 					if (!strcmp(subString, comp)){
-						subString = strtok(NULL, s);
+						subString = strtok(NULL, ":");
 						send_message(subString, curr->session_ID);
 						found = true;
 					}
@@ -528,7 +522,7 @@ void quit(){
 }
 
 void invite(char *client_ID, char *session_ID){
-	printf("Invite got client: %s, and session: %s\n", client_ID, session_ID);
+	// printf("Invite got client: %s, and session: %s\n", client_ID, session_ID);
 	char *message;
 	char *invitation = malloc(sizeof(session_ID)
 	 + sizeof(client_ID) + 2);
@@ -544,10 +538,12 @@ void invite(char *client_ID, char *session_ID){
 
 // MESSAGE:len:client_ID:session_ID:text
 void send_message(char *text, char *session_ID) {
-	char *input = malloc(sizeof(text) + sizeof(session_ID) + 2);
+	char *input = malloc(sizeof(text) + sizeof(session_ID) + 50);
 	strcpy(input, session_ID);
 	strcat(input, ":");
 	strcat(input, text); 
+	strcat(input, "\0");
+
 	char *message = pack_message(MESSAGE, strlen(input), current_user.client_ID, input);
 
 	int bytes_sent;
@@ -556,11 +552,11 @@ void send_message(char *text, char *session_ID) {
 }
 
 char* pack_message(unsigned int type, unsigned int size,
- char source[MAX_NAME], char data[MAX_DATA]){
-
+ char *source, char *data){
+	// printf("packing data: %s\n", data);
 	char temp[20];
-	char *output = malloc(sizeof(char)*5000);
-	
+	char *output = (char*)malloc(sizeof(char)*5000);
+
 	sprintf(temp, "%u", type);
 	strcpy(output, temp);
 	strcat(output, ":");
@@ -596,6 +592,7 @@ void decode(char *message){
 	struct timeval tv;
 	tv.tv_sec = 2;
 	tv.tv_usec = 500000;
+	printf("decoding message: %s\n", message);
 
 	char *msg_cpy = malloc(strlen(message));
 	strcpy(msg_cpy, message);
@@ -654,9 +651,9 @@ void decode(char *message){
 				while (count < length){
 					printf("       %s\n", string);
 					count++;
-					string = (NULL, colon);
-					string = (NULL, colon);
-					printf("string is: %s\n", string);
+					string = strtok(NULL, colon);
+					// string = (NULL, colon);
+					// printf("string is: %s\n", string);
 				}
 				session++;
 				//string = strtok(NULL, colon);

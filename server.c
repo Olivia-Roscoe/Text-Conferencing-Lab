@@ -67,6 +67,7 @@ struct client{
 	char password[MAX_NAME];
 	bool connected;
 	bool connected_session;
+	int num_sessions;
 	int client_socket;
 
 	struct sessionL *sessions;
@@ -302,7 +303,7 @@ int main(int argc, char *argv[]){
 						FD_CLR(i, &master); // remove from master set
 					} else {
 						buf[nbytes] = '\0';
-						printf("Hey we got %s\n", buf);
+						// printf("Hey we got %s\n", buf);
 
 						msg_Type = unpack_message(buf, i, listener);
 						// we got some data from a client
@@ -341,7 +342,7 @@ int unpack_message(char *message, int sockfd, int listener){
 	
 	
 	while(string != NULL && count < 4){
-		printf("string = %s\n", string);
+
 		switch (count){
 			case 0:
 				msg_Type = atoi(string);
@@ -655,28 +656,49 @@ void leave(char *client_ID, char *session_ID){
 
 	// check if its the head of the list
 	if (strcmp(client_ID, prev->client_ID) == 0){
+		printf("It's the head of the list\n");
 		temp = prev;
-		current_session->clients->next = prev->next;
 
-		current->connected_session = false;
+		if (prev->next != NULL){
+			strcpy(current_session->clients->client_ID, prev->next->client_ID);
+			printf("next id is : %s, just copied %s\n", prev->next->client_ID, current_session->clients->client_ID);
+			current_session->clients = prev->next;
+			current_session->clients->next = prev->next->next;
+		} else {
+			printf("You're alone\n");
+			current_session->clients = NULL;
+		}
+
+		// current->connected_session = false;
 		FD_CLR(current->client_socket, &current_session->socket_list);
 
+		//free(temp->next);
 		free(temp);
-		return;
+		// return;
 	}
 
 	while (curr != NULL){
+		printf("Its not the head of the list\n");
 		if (strcmp(client_ID, curr->client_ID) == 0){
 			temp = curr;
 			prev->next = curr->next;
+			free(temp->next);
 			free(temp);
 
-			current->connected_session = false;
+			// current->connected_session = false;
 			
 			FD_CLR(current->client_socket, &current_session->socket_list);
-			return;
+			// return;
 		}
 		prev = curr;
+		curr = curr->next;
+	}
+
+	curr = current_session->clients;
+	while (curr != NULL){
+
+		printf("current id: %s\n", curr->client_ID);
+
 		curr = curr->next;
 	}
 
